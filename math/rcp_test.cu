@@ -1,7 +1,7 @@
 //
 // rcp_test.cu
 //
-// Tests reciprocal using v_rcp_f32 on AMD MI300 hardware,
+// Tests reciprocal using rcp on NVIDIA H100 hardware,
 // comparing against 1.0f / x and optional torch reciprocal outputs.
 //
 #include <cmath>
@@ -77,7 +77,7 @@ public:
   static constexpr size_t N = sizeof(kCases) / sizeof(kCases[0]);
   float input[N];
   float output_asm[N];
-  float output_rocm_div[N];
+  float output_cuda_div[N];
 
   __host__ RcpTester() {
     for (size_t i = 0; i < N; i++) {
@@ -87,34 +87,34 @@ public:
 
   void __host__ reset() {
     std::memset(output_asm, 0xff, sizeof(output_asm));
-    std::memset(output_rocm_div, 0xff, sizeof(output_rocm_div));
+    std::memset(output_cuda_div, 0xff, sizeof(output_cuda_div));
   }
 
   void __host__ displayResults(const float *torchinductor,
                                const float *torcheager) const;
-
-  __global__ static void testKernelRcpAsm(RcpTester *self) {
-    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < N) {
-      self->output_asm[idx] = CUSTOM_RCPF(self->input[idx]);
-    }
-  }
-
-  __global__ static void testKernelROCmDiv(RcpTester *self) {
-    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < N) {
-      self->output_rocm_div[idx] = 1.0f / self->input[idx];
-    }
-  }
-
-  __global__ static void testKernelOneRcpAsm(RcpTester *self) {
-    self->output_asm[0] = CUSTOM_RCPF(self->input[0]);
-  }
-
-  __global__ static void testKernelOneROCmDiv(RcpTester *self) {
-    self->output_rocm_div[0] = 1.0f / self->input[0];
-  }
 };
+
+__global__ void testKernelRcpAsm(RcpTester *self) {
+  size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < RcpTester::N) {
+    self->output_asm[idx] = CUSTOM_RCPF(self->input[idx]);
+  }
+}
+
+__global__ void testKernelCudaDiv(RcpTester *self) {
+  size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < RcpTester::N) {
+    self->output_cuda_div[idx] = 1.0f / self->input[idx];
+  }
+}
+
+__global__ void testKernelOneRcpAsm(RcpTester *self) {
+  self->output_asm[0] = CUSTOM_RCPF(self->input[0]);
+}
+
+__global__ void testKernelOneCudaDiv(RcpTester *self) {
+  self->output_cuda_div[0] = 1.0f / self->input[0];
+}
 
 bool verbose{};
 bool useColor{};
@@ -149,7 +149,7 @@ void __host__ RcpTester::displayResults(const float *torchinductor,
     float x = input[i];
     float ref = 1.0f / x;
 
-    OneResult32 v_div(ref, output_rocm_div[i], true, verbose);
+    OneResult32 v_div(ref, output_cuda_div[i], true, verbose);
     OneResult32 v_asm(ref, output_asm[i], true, verbose);
     OneResult32 v_eager(ref, torcheager ? torcheager[i] : 0.0f,
                       torcheager != nullptr, verbose);
@@ -324,12 +324,10 @@ int main(int argc, char **argv) {
 
   tester->reset();
 
-  hipLaunchKernelGGL(HIP_KERNEL_NAME(RcpTester::testKernelRcpAsm), gridSize,
-                     blockSize, 0, 0, tester);
+  testKernelRcpAsm<<<gridSize, blockSize>>>(tester);
   CUDA_CHECK(cudaDeviceSynchronize());
 
-  hipLaunchKernelGGL(HIP_KERNEL_NAME(RcpTester::testKernelROCmDiv), gridSize,
-                     blockSize, 0, 0, tester);
+  testKernelCudaDiv<<<gridSize, blockSize>>>(tester);
   CUDA_CHECK(cudaDeviceSynchronize());
 
   tester->displayResults(torchinductorFile ? torchinductorOut.data() : nullptr,
