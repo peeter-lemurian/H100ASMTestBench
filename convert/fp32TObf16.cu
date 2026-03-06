@@ -1,7 +1,7 @@
 //
-// fp32TObf16.hip
+// fp32TObf16.cu
 //
-// Tests FP32->BF16 conversion on AMD MI300 hardware, comparing:
+// Tests FP32->BF16 conversion on NVIDIA H100 hardware, comparing:
 //   1. __float2bfloat16 (ROCm builtin reference)
 //   2. custom truncation (shift-right only)
 //   3. custom round-to-nearest-even-like conversion
@@ -21,11 +21,11 @@
 
 #include "OneResult16.hpp"
 #include "colors.hpp"
-#include "hipcheck.hpp"
+#include "cuda_check.hpp"
 
 // clang-format off
 inline __nv_bfloat16 __device__ fp32TObf16Rounding(float input) {
-  return __float2bfloat16(float); // future: inline ASM version.
+  return __float2bfloat16(input); // future: inline ASM version.
 }
 
 inline __nv_bfloat16 __device__ fp32TObf16Truncation(float input) {
@@ -33,7 +33,7 @@ inline __nv_bfloat16 __device__ fp32TObf16Truncation(float input) {
   uint32_t result;
 
   __builtin_memcpy(&input_bits, &input, sizeof(float));
-  result >>= 16;
+  result = input_bits >> 16;
 
   uint16_t bf16_bits = static_cast<uint16_t>(result);
   return *reinterpret_cast<__nv_bfloat16 *>(&bf16_bits);
@@ -108,42 +108,42 @@ public:
   }
 
   void __host__ displayResults() const;
-
-  // -- kernels for full-table testing ---------------------------------------
-  __global__ static void testKernelRef(Fp32ToBf16Tester *self) {
-    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < N) {
-      self->output_ref[idx] = __float2bfloat16(self->input[idx]);
-    }
-  }
-
-  __global__ static void testKernelTrunc(Fp32ToBf16Tester *self) {
-    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < N) {
-      self->output_trunc[idx] = fp32TObf16Truncation(self->input[idx]);
-    }
-  }
-
-  __global__ static void testKernelRound(Fp32ToBf16Tester *self) {
-    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < N) {
-      self->output_round[idx] = fp32TObf16Rounding(self->input[idx]);
-    }
-  }
-
-  // -- kernels for one-value asm inspection ---------------------------------
-  __global__ static void testKernelOneRef(Fp32ToBf16Tester *self) {
-    self->output_ref[0] = __float2bfloat16(self->input[0]);
-  }
-
-  __global__ static void testKernelOneTrunc(Fp32ToBf16Tester *self) {
-    self->output_trunc[0] = fp32TObf16Truncation(self->input[0]);
-  }
-
-  __global__ static void testKernelOneRound(Fp32ToBf16Tester *self) {
-    self->output_round[0] = fp32TObf16Rounding(self->input[0]);
-  }
 };
+
+// -- kernels for full-table testing ---------------------------------------
+__global__ void testKernelRef(Fp32ToBf16Tester *self) {
+  size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < Fp32ToBf16Tester::N) {
+    self->output_ref[idx] = __float2bfloat16(self->input[idx]);
+  }
+}
+
+__global__ void testKernelTrunc(Fp32ToBf16Tester *self) {
+  size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < Fp32ToBf16Tester::N) {
+    self->output_trunc[idx] = fp32TObf16Truncation(self->input[idx]);
+  }
+}
+
+__global__ void testKernelRound(Fp32ToBf16Tester *self) {
+  size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < Fp32ToBf16Tester::N) {
+    self->output_round[idx] = fp32TObf16Rounding(self->input[idx]);
+  }
+}
+
+// -- kernels for one-value asm inspection ---------------------------------
+__global__ void testKernelOneRef(Fp32ToBf16Tester *self) {
+  self->output_ref[0] = __float2bfloat16(self->input[0]);
+}
+
+__global__ void testKernelOneTrunc(Fp32ToBf16Tester *self) {
+  self->output_trunc[0] = fp32TObf16Truncation(self->input[0]);
+}
+
+__global__ void testKernelOneRound(Fp32ToBf16Tester *self) {
+  self->output_round[0] = fp32TObf16Rounding(self->input[0]);
+}
 
 bool verbose{};
 bool useColor{};
@@ -304,16 +304,13 @@ int main(int argc, char **argv) {
 
   tester->reset();
 
-  hipLaunchKernelGGL(HIP_KERNEL_NAME(Fp32ToBf16Tester::testKernelRef), gridSize,
-                     blockSize, 0, 0, tester);
+  testKernelRef<<<gridSize, blockSize>>>(tester);
   CUDA_CHECK(cudaDeviceSynchronize());
 
-  hipLaunchKernelGGL(HIP_KERNEL_NAME(Fp32ToBf16Tester::testKernelTrunc),
-                     gridSize, blockSize, 0, 0, tester);
+  testKernelTrunc<<<gridSize, blockSize>>>(tester);
   CUDA_CHECK(cudaDeviceSynchronize());
 
-  hipLaunchKernelGGL(HIP_KERNEL_NAME(Fp32ToBf16Tester::testKernelRound),
-                     gridSize, blockSize, 0, 0, tester);
+  testKernelRound<<<gridSize, blockSize>>>(tester);
   CUDA_CHECK(cudaDeviceSynchronize());
 
   tester->displayResults();

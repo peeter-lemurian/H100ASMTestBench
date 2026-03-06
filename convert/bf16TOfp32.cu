@@ -53,36 +53,36 @@ public:
   }
 
   void __host__ displayAndCheckResults(const char *how) const;
-
-  ////////////////////////////////////////////////////////////////
-  /// Kernels just for looking at the generated assembly:
-  ///
-  __global__ static void convertKernelOneValue(Bf16ToFp32Converter *self) {
-    self->output[0] = __bfloat162float(self->input[0]);
-  }
-
-  __global__ static void convertKernelOneValueShift(Bf16ToFp32Converter *self) {
-    self->output[0] = bf16TOfp32Shift(self->input[0]);
-  }
-
-
-  ////////////////////////////////////////////////////////////////
-  /// Kernels that use each of the conversion methods:
-  ///
-  __global__ static void convertKernel(Bf16ToFp32Converter *self) {
-    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < N) {
-      self->output[idx] = __bfloat162float(self->input[idx]);
-    }
-  }
-
-  __global__ static void convertKernelShift(Bf16ToFp32Converter *self) {
-    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < N) {
-      self->output[idx] = bf16TOfp32Shift(self->input[idx]);
-    }
-  }
 };
+
+////////////////////////////////////////////////////////////////
+/// Kernels just for looking at the generated assembly:
+///
+__global__ void convertKernelOneValue(Bf16ToFp32Converter *self) {
+  self->output[0] = __bfloat162float(self->input[0]);
+}
+
+__global__ void convertKernelOneValueShift(Bf16ToFp32Converter *self) {
+  self->output[0] = bf16TOfp32Shift(self->input[0]);
+}
+
+
+////////////////////////////////////////////////////////////////
+/// Kernels that use each of the conversion methods:
+///
+__global__ void convertKernel(Bf16ToFp32Converter *self) {
+  size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < Bf16ToFp32Converter::N) {
+    self->output[idx] = __bfloat162float(self->input[idx]);
+  }
+}
+
+__global__ void convertKernelShift(Bf16ToFp32Converter *self) {
+  size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < Bf16ToFp32Converter::N) {
+    self->output[idx] = bf16TOfp32Shift(self->input[idx]);
+  }
+}
 
 __host__ Bf16ToFp32Converter::Bf16ToFp32Converter() {
   // Initialize input data with various test cases
@@ -229,14 +229,12 @@ int main() {
   dim3 gridSize(1);
 
   converter->reset();
-  hipLaunchKernelGGL(HIP_KERNEL_NAME(Bf16ToFp32Converter::convertKernel),
-                     gridSize, blockSize, 0, 0, converter);
+  convertKernel<<<gridSize, blockSize>>>(converter);
   CUDA_CHECK(cudaDeviceSynchronize());
   converter->displayAndCheckResults("__bfloat162float");
 
   converter->reset();
-  hipLaunchKernelGGL(HIP_KERNEL_NAME(Bf16ToFp32Converter::convertKernelShift),
-                     gridSize, blockSize, 0, 0, converter);
+  convertKernelShift<<<gridSize, blockSize>>>(converter);
   CUDA_CHECK(cudaDeviceSynchronize());
   converter->displayAndCheckResults("bf16TOfp32Shift");
 
