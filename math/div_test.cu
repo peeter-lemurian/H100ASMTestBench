@@ -30,171 +30,16 @@
 #include "readbinary.hpp"
 
 // ---------------------------------------------------------------------------
-// Custom division using v_rcp_f32 + v_mul_f32
+// Custom division: placeholder for ASM version
 // ---------------------------------------------------------------------------
 // clang-format off
 inline float __device__ custom_div_naive(float a, float b) {
-  float result;
-  __asm__ __volatile__("v_rcp_f32_e32 %0, %2\n\t"
-                       "s_nop 1\n\t"
-                       "v_mul_f32_e32 %0, %0, %1\n\t"
-                       : "=&v"(result) // %0
-                       : "v"(a),        // %1
-                         "v"(b)         // %2
-                       );
-  return result;
-}
-
-// product of numerator with the reciprocal, using div scale/fixup to
-// handle pairs of very small/large numbers, but not using any
-// Newton's method refinement of the initial reciprocal estimate.
-inline float __device__ custom_div_no_newton(float a, float b) {
-  float scale_b, scale_a;
-  float rcp;
-  float result;
-  uint64_t cmp_b;
-
-  __asm__ __volatile__(
-      "v_div_scale_f32 %0, %4, %6, %6, %5     ;; scale_b = div_scale(b, b, a)\n\t"
-      "v_rcp_f32_e32 %2, %0                   ;; rcp = rcp(scale_b)\n\t"
-      "v_div_scale_f32 %1, vcc, %5, %6, %5    ;; scale_a = div_scale(a, b, a), assuming that div_scale consumes TRANS hazard\n\t"
-
-      "                                       ;; Form quotient directly, no Newton refinement\n\t"
-      "v_mul_f32_e32 %2, %1, %2               ;; rcp = scale_a * rcp\n\t"
-
-      "                                       ;; Final fixup (skipping div_fmas)\n\t"
-      "v_div_fixup_f32 %3, %2, %6, %5         ;; result = div_fixup(rcp, b, a)\n\t"
-
-      : "=&v"(scale_b), // %0
-        "=&v"(scale_a), // %1
-        "=&v"(rcp),     // %2
-        "=v"(result),   // %3 no early clobber, written only after all inputs are consumed.
-        "=&s"(cmp_b)    // %4
-      : "v"(a),         // %5
-        "v"(b)          // %6
-      : "vcc");
-
-  return result;
-}
-
-//  No div_scale/div_fixup, so special cases (0, inf, NaN, overflow) are not
-//  handled correctly. Intended as a diagnostic baseline.
-inline float __device__ custom_div_simple(float a, float b) {
-  float rcp;
-  float tmp;
-  float result;
-
-  /*
-  Computes a/b as a * rcp(b), with one Newton-Raphson refinement of rcp(b):
-
-    f(x) = 1/x - b,  f'(x) = -1/x²
-
-  giving the iteration:
-
-    x₂ = x₁ + x₁(1 - b·x₁)
-
-  */
-  __asm__ __volatile__(
-      "v_rcp_f32_e32 %0, %3                   ;; rcp = rcp(b)\n\t"
-      "s_nop 1                                ;; TRANS hazard\n\t"
-
-      "                                       ;; Newton-Raphson refinement of rcp\n\t"
-      "v_fma_f32 %1, -%3, %0, 1.0             ;; tmp = 1 - b*rcp\n\t"
-      "v_fmac_f32_e32 %0, %1, %0              ;; rcp = rcp + tmp*rcp\n\t"
-
-      "                                       ;; Form quotient\n\t"
-      "v_mul_f32_e32 %2, %4, %0               ;; result = a * rcp\n\t"
-
-      : "=&v"(rcp),   // %0
-        "=&v"(tmp),   // %1
-        "=v"(result)  // %2 no early clobber, written only after all inputs are consumed.
-      : "v"(b),       // %3
-        "v"(a)        // %4
-      :               // no vcc clobber needed
-  );
-
-  return result;
-}
-
-//
-// There are a few phases to this computation:
-//
-// 1. Scale inputs to avoid overflow/underflow
-// 2. Newton-Raphson reciprocal refinement of scaled divisor
-// 3. Compute quotient and refine
-// 4. Final fixup, handling all the IEEE-754 special cases: NaN propagation,
-// infinities, division by zero, signed zero, denormal results. Produces the
-// final correctly-rounded and correctly-signed result. 
-//
-// This sequence MUST use VCC, and cannot use a scalar register pair.
-// If VCC clobber was not desired, VCC would have to be spilled to a scalar
-// register pair.
-inline float __device__ custom_div_rocm_like(float a, float b) {
-  float scale_b, scale_a;
-  float rcp;
-  float tmp1, tmp2;
-  float result;
-  uint64_t cmp_b;
-
-  /*
-  The Newton's method refinement used below, is based on a definition of:
-
-    f(x) = 1/x - b,
-
-  for which
-
-    f'(x) = -1/x².
-
-  The slope at some initial guess x₁ is
-
-    f'(x₁) = -1/x₁²  ≈  (f(x₁) - 0) / (x₁ - x₂).
-
-  Rearranging for x₂, we have
-
-    x₂ = x₁ + x₁(1 - b·x₁).
-
-  */
-  __asm__ __volatile__(
-      "v_div_scale_f32 %0, %6, %8, %8, %7     ;; scale_b = div_scale(b, b, a)\n\t"
-      "v_rcp_f32_e32 %2, %0                   ;; rcp = rcp(scale_b)\n\t"
-      "v_div_scale_f32 %1, vcc, %7, %8, %7    ;; scale_a = div_scale(a, b, a)\n\t"
-
-      "                                       ;; Newton-Raphson refinement of rcp\n\t"
-      "v_fma_f32 %3, -%0, %2, 1.0             ;; tmp1 = 1 - scale_b*rcp\n\t"
-      "v_fmac_f32_e32 %2, %3, %2              ;; rcp  = rcp + tmp1*rcp\n\t"
-
-      "                                       ;; Iterative refinement of quotient\n\t"
-      "v_mul_f32_e32 %3, %1, %2               ;; tmp1 = scale_a * rcp\n\t"
-      "v_fma_f32 %4, -%0, %3, %1              ;; tmp2 = scale_a - scale_b*tmp1\n\t"
-      "v_fmac_f32_e32 %3, %4, %2              ;; tmp1 = tmp1 + tmp2*rcp\n\t"
-      "v_fma_f32 %0, -%0, %3, %1              ;; scale_b = scale_a - scale_b*tmp1\n\t"
-
-      "                                       ;; Final fixup\n\t"
-      "v_div_fmas_f32 %0, %0, %2, %3          ;; tmp = div_fmas(scale_b, rcp, tmp1)\n\t"
-      "v_div_fixup_f32 %5, %0, %8, %7         ;; result = div_fixup(tmp, b, a)\n\t"
-
-      : "=&v"(scale_b), // %0
-        "=&v"(scale_a), // %1
-        "=&v"(rcp),     // %2
-        "=&v"(tmp1),    // %3
-        "=&v"(tmp2),    // %4
-        "=v"(result),   // %5 no early clobber, written only after all inputs are consumed.
-        "=&s"(cmp_b)    // %6 sgpr pair for first div_scale condition
-      : "v"(a),         // %7
-        "v"(b)          // %8
-      : "vcc");
-
+  float result = (a/b);
   return result;
 }
 // clang-format on
 
-#ifdef DILUVIAN_FAST_MATH
 #define CUSTOM_DIV custom_div_naive
-#else
-#define CUSTOM_DIV custom_div_rocm_like
-#endif
-// #define CUSTOM_DIV custom_div_no_newton
-// #define CUSTOM_DIV custom_div_simple
 
 // ---------------------------------------------------------------------------
 // Test-case table
@@ -711,7 +556,7 @@ public:
   float input_b[N];
   float output_div[N];        // ROCm operator/
   float output_fdividef[N];   // ROCm fdividef() (fast approx)
-  float output_custom_div[N]; // CUSTOM_DIV() using v_rcp_f32 + v_mul_f32
+  float output_custom_div[N]; // CUSTOM_DIV() -- placeholder for later ASM version.
 
   __host__ DivTester() {
     for (size_t i = 0; i < N; i++) {
