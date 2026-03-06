@@ -28,8 +28,7 @@ inline __device__ uint32_t cmp_eq(float a, float b) {
   return result;
 }
 
-class Comparator {
-public:
+struct Comparator {
   static constexpr size_t N = 16;
   float input[N];
   uint32_t output[N - 1];
@@ -41,72 +40,72 @@ public:
   void __host__
   displayAndCheckResults(const char *what, const char *op,
                          std::function<float(float, float)> expected) const;
-
-  ////////////////////////////////////////////////////////////////
-  /// Single-element kernels (for assembly inspection):
-  ///
-  __global__ static void convertKernelOneLess(Comparator *self) {
-    self->output[0] = (self->input[0] < self->input[1]);
-  }
-
-  __global__ static void convertKernelOneGreater(Comparator *self) {
-    self->output[0] = (self->input[0] > self->input[1]);
-  }
-
-  __global__ static void convertKernelOneEqual(Comparator *self) {
-    self->output[0] = (self->input[0] == self->input[1]);
-  }
-
-  ////////////////////////////////////////////////////////////////
-  /// Parallel kernels: one thread per output element.
-  /// Launch with blockSize(N-1), gridSize(1).
-  ///
-  __global__ static void convertKernelLessC(Comparator *self) {
-    int i = threadIdx.x;  // i in [0, N-2]
-    self->output[i] = (self->input[i] < self->input[i + 1]);
-  }
-
-  __global__ static void convertKernelGreaterC(Comparator *self) {
-    int i = threadIdx.x;
-    self->output[i] = (self->input[i] > self->input[i + 1]);
-  }
-
-  __global__ static void convertKernelEqualC(Comparator *self) {
-    int i = threadIdx.x;
-    self->output[i] = (self->input[i] == self->input[i + 1]);
-  }
-
-  __global__ static void convertKernelLessASM(Comparator *self) {
-    int i = threadIdx.x;
-    self->output[i] = cmp_lt(self->input[i], self->input[i + 1]);
-  }
-
-  __global__ static void convertKernelGreaterASM(Comparator *self) {
-    int i = threadIdx.x;
-    self->output[i] = cmp_gt(self->input[i], self->input[i + 1]);
-  }
-
-  __global__ static void convertKernelEqualASM(Comparator *self) {
-    int i = threadIdx.x;
-    self->output[i] = cmp_eq(self->input[i], self->input[i + 1]);
-  }
-
-  // kernels for just looking at the ASM
-  __global__ static void convertKernelOnegLessASM(Comparator *self) {
-    int i = 0;
-    self->output[i] = cmp_lt(self->input[i], self->input[i + 1]);
-  }
-
-  __global__ static void convertKernelOnegGreaterASM(Comparator *self) {
-    int i = 0;
-    self->output[i] = cmp_gt(self->input[i], self->input[i + 1]);
-  }
-
-  __global__ static void convertKernelOnegEqualASM(Comparator *self) {
-    int i = 0;
-    self->output[i] = cmp_eq(self->input[i], self->input[i + 1]);
-  }
 };
+
+////////////////////////////////////////////////////////////////
+/// Single-element kernels (for assembly inspection):
+///
+__global__ void convertKernelOneLess(Comparator *self) {
+  self->output[0] = (self->input[0] < self->input[1]);
+}
+
+__global__ void convertKernelOneGreater(Comparator *self) {
+  self->output[0] = (self->input[0] > self->input[1]);
+}
+
+__global__ void convertKernelOneEqual(Comparator *self) {
+  self->output[0] = (self->input[0] == self->input[1]);
+}
+
+////////////////////////////////////////////////////////////////
+/// Parallel kernels: one thread per output element.
+/// Launch with blockSize(N-1), gridSize(1).
+///
+__global__ void convertKernelLessC(Comparator *self) {
+  int i = threadIdx.x;  // i in [0, N-2]
+  self->output[i] = (self->input[i] < self->input[i + 1]);
+}
+
+__global__ void convertKernelGreaterC(Comparator *self) {
+  int i = threadIdx.x;
+  self->output[i] = (self->input[i] > self->input[i + 1]);
+}
+
+__global__ void convertKernelEqualC(Comparator *self) {
+  int i = threadIdx.x;
+  self->output[i] = (self->input[i] == self->input[i + 1]);
+}
+
+__global__ void convertKernelLessASM(Comparator *self) {
+  int i = threadIdx.x;
+  self->output[i] = cmp_lt(self->input[i], self->input[i + 1]);
+}
+
+__global__ void convertKernelGreaterASM(Comparator *self) {
+  int i = threadIdx.x;
+  self->output[i] = cmp_gt(self->input[i], self->input[i + 1]);
+}
+
+__global__ void convertKernelEqualASM(Comparator *self) {
+  int i = threadIdx.x;
+  self->output[i] = cmp_eq(self->input[i], self->input[i + 1]);
+}
+
+// kernels for just looking at the ASM
+__global__ void convertKernelOnegLessASM(Comparator *self) {
+  int i = 0;
+  self->output[i] = cmp_lt(self->input[i], self->input[i + 1]);
+}
+
+__global__ void convertKernelOnegGreaterASM(Comparator *self) {
+  int i = 0;
+  self->output[i] = cmp_gt(self->input[i], self->input[i + 1]);
+}
+
+__global__ void convertKernelOnegEqualASM(Comparator *self) {
+  int i = 0;
+  self->output[i] = cmp_eq(self->input[i], self->input[i + 1]);
+}
 
 __host__ Comparator::Comparator() {
   input[0]  = 1.5f;
@@ -154,32 +153,32 @@ int main() {
   auto eq = [](float a, float b) { return a == b ? 1 : 0; };
 
   converter->reset();
-  Comparator::convertKernelLessC<<<gridSize, blockSize>>>(converter);
+  convertKernelLessC<<<gridSize, blockSize>>>(converter);
   CUDA_CHECK(cudaDeviceSynchronize());
   converter->displayAndCheckResults("[C++]", "<", lt);
 
   converter->reset();
-  Comparator::convertKernelGreaterC<<<gridSize, blockSize>>>(converter);
+  convertKernelGreaterC<<<gridSize, blockSize>>>(converter);
   CUDA_CHECK(cudaDeviceSynchronize());
   converter->displayAndCheckResults("[C++]", ">", gt);
 
   converter->reset();
-  Comparator::convertKernelEqualC<<<gridSize, blockSize>>>(converter);
+  convertKernelEqualC<<<gridSize, blockSize>>>(converter);
   CUDA_CHECK(cudaDeviceSynchronize());
   converter->displayAndCheckResults("[C++]", "==", eq);
 
   converter->reset();
-  Comparator::convertKernelLessASM<<<gridSize, blockSize>>>(converter);
+  convertKernelLessASM<<<gridSize, blockSize>>>(converter);
   CUDA_CHECK(cudaDeviceSynchronize());
   converter->displayAndCheckResults("[ASM]", "<", lt);
 
   converter->reset();
-  Comparator::convertKernelGreaterASM<<<gridSize, blockSize>>>(converter);
+  convertKernelGreaterASM<<<gridSize, blockSize>>>(converter);
   CUDA_CHECK(cudaDeviceSynchronize());
   converter->displayAndCheckResults("[ASM]", ">", gt);
 
   converter->reset();
-  Comparator::convertKernelEqualASM<<<gridSize, blockSize>>>(converter);
+  convertKernelEqualASM<<<gridSize, blockSize>>>(converter);
   CUDA_CHECK(cudaDeviceSynchronize());
   converter->displayAndCheckResults("[ASM]", "==", eq);
 
