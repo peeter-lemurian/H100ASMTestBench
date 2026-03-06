@@ -1,8 +1,3 @@
-function(add_cuda_executable name)
-  add_executable(${name} ${name}.cu)
-  set_target_properties(${name} PROPERTIES OUTPUT_NAME ${name})
-endfunction()
-
 add_cuda_executable(cossin_test)
 add_cuda_executable(div_test)
 add_cuda_executable(exp2f_test)

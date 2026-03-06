@@ -15,6 +15,11 @@ add_compile_options($<$<COMPILE_LANGUAGE:CUDA>:--keep>)
 
 include_directories(${PROJECT_SOURCE_DIR}/include)
 
+function(add_cuda_executable name)
+  add_executable(${name} ${name}.cu)
+  set_target_properties(${name} PROPERTIES OUTPUT_NAME ${name})
+endfunction()
+
 add_subdirectory(compare)
 add_subdirectory(convert)
 add_subdirectory(demo)
