@@ -2,8 +2,8 @@
 // exp2f_test.cu
 //
 // Test harness for 2^x on GPU:
-//   - direct v_exp_f32 asm (CUSTOM_EXP2F)
-//   - ROCm exp2f
+//   - Expect use of PTX ex2 (CUSTOM_EXP2F -- placeholder for ASM)
+//   - CUDA exp2f
 //
 #include <cmath>
 #include <cstdint>
@@ -22,85 +22,13 @@
 #include "hipcheck.hpp"
 
 // clang-format off
-inline float __device__ exp2_f32_inplace(float x) {
-  float result;
-  __asm__ __volatile__(
-      "v_exp_f32_e32 %0, %1 ;; 2^x\n\t"
-      : "=v"(result) // %0
-      : "v"(x)       // %1
-      );
-  return result;
-}
-
-inline float __device__ exp2_f32_subnorm_fixup_vcc(float x) {
-  float result;
-  float thresh;
-  float sub_scale;
-  float shift;
-  float tmp;
-
-  __asm__ __volatile__(
-      "v_mov_b32_e32 %1, 0xc2fc0000             ;; thresh = -126.0f\n\t"
-      "v_mov_b32_e32 %2, 0x1f800000             ;; sub_scale = 2^-64\n\t"
-      "v_cmp_lt_f32_e32 vcc, %5, %1             ;; x < -126\n\t"
-      "s_nop 1                                  ;; vcc hazard
-      "v_cndmask_b32_e32 %0, 1.0, %2, vcc       ;; scale = (x < -126) ? 2^-64 : 1.0\n\t"
-      "v_mov_b32_e32 %3, 0x42800000             ;; 64.0f\n\t"
-      "v_cndmask_b32_e32 %3, 0, %3, vcc         ;; shift = (x < -126) ? 64.0f : 0.0f\n\t"
-      "v_add_f32_e32 %4, %5, %3                 ;; tmp = x + shift\n\t"
-      "v_exp_f32_e32 %4, %4                     ;; tmp = 2^(x+shift)\n\t"
-      "s_nop 0                                  ;; wait-state for v_exp_f32 result\n\t"
-      "v_mul_f32_e32 %0, %4, %0                 ;; result = tmp * scale\n\t"
-      : "=&v"(result),    // %0
-        "=&v"(thresh),    // %1
-        "=&v"(sub_scale), // %2
-        "=&v"(shift),     // %3
-        "=v"(tmp)         // %4 no early clobber, written only after all inputs are consumed.
-      : "v"(x)            // %5
-      : "vcc");
-
-  return result;
-}
-
-inline float __device__ exp2_f32_subnorm_fixup_stemp(float x) {
-  float result;
-  float thresh;
-  float sub_scale;
-  float shift;
-  float tmp;
-  uint64_t stemp;
-
-  __asm__ __volatile__(
-      "v_mov_b32_e32 %1, 0xc2fc0000             ;; thresh = -126.0f\n\t"
-      "v_mov_b32_e32 %2, 0x1f800000             ;; sub_scale = 2^-64\n\t"
-      "v_cmp_lt_f32 %5, %6, %1                  ;; x < -126\n\t"
-      "s_nop 1                                  ;; stemp hazard
-      "v_cndmask_b32 %0, 1.0, %2, %5            ;; scale = (x < -126) ? 2^-64 : 1.0\n\t"
-      "v_mov_b32_e32 %3, 0x42800000             ;; 64.0f\n\t"
-      "v_cndmask_b32 %3, 0, %3, %5              ;; shift = (x < -126) ? 64.0f : 0.0f\n\t"
-      "v_add_f32_e32 %4, %6, %3                 ;; tmp = x + shift\n\t"
-      "v_exp_f32_e32 %4, %4                     ;; tmp = 2^(x+shift)\n\t"
-      "s_nop 0                                  ;; wait-state for v_exp_f32 result\n\t"
-      "v_mul_f32_e32 %0, %4, %0                 ;; result = tmp * scale\n\t"
-      : "=&v"(result),    // %0
-        "=&v"(thresh),    // %1
-        "=&v"(sub_scale), // %2
-        "=&v"(shift),     // %3
-        "=v"(tmp),        // %4 no early clobber, written only after all inputs are consumed.
-        "=s"(stemp)       // %5 no early clobber, scalar output cannot overlap vector inputs.
-      : "v"(x)            // %6
-      : /* no clobbers */ );
-
+inline float __device__ exp2_f32(float x) {
+  float result = exp2f(x); // placeholder for ASM version.
   return result;
 }
 // clang-format on
 
-#ifdef DILUVIAN_FAST_MATH
-#define CUSTOM_EXP2F exp2_f32_inplace
-#else
-//#define CUSTOM_EXP2F exp2_f32_subnorm_fixup_vcc
-#define CUSTOM_EXP2F exp2_f32_subnorm_fixup_stemp
-#endif
+#define CUSTOM_EXP2F exp2_f32
 
 struct Exp2Case {
   float x;
@@ -334,9 +262,9 @@ int main(int argc, char **argv) {
                    " [--torcheager torcheagerexp2.bin]"
                    " [--torchinductor torchinductorexp2.bin]"
                    "\n\n"
-                   "./exp2f_test --dump-inputs ./exp2test.in\n"
+                   "./math/exp2f_test --dump-inputs ./exp2test.in\n"
                    "../torch/torchunary.py --op exp2 --file ./exp2test.in\n"
-                   "./exp2f_test --torchinductor torchinductorexp2.bin --torcheager torcheagerexp2.bin --verbose --quiet --color | less -R\n\n"
+                   "./math/exp2f_test --torchinductor torchinductorexp2.bin --torcheager torcheagerexp2.bin --verbose --quiet --color | less -R\n\n"
                    "\t--dump-inputs filename.  Write input values as binary "
                    "floats to file (x0,x1,x2,...)\n"
                    "\t--verbose.  Show hex values, even if not mismatches\n"
