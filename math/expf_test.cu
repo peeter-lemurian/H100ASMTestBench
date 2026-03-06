@@ -23,130 +23,14 @@
 #include "cuda_check.hpp"
 
 // clang-format off
-// Proper e^x implementation using v_mul_f32 + v_exp_f32
-inline float __device__ exp_f32_scale_as_input(float x) {
-  constexpr float log2e = 1.44269504088896340736f; // log2(e)
-  float result;
-
-  // no early clobber required, since %1, %2 (inputs) are not ever read
-  // after the first %0 output operation.
-  __asm__ __volatile__("v_mul_f32 %0, %1, %2 ;; x * log2(e)\n\t"
-                       "v_exp_f32 %0, %0     ;; 2^(x * log2(e))\n\t"
-                       : "=v"(result) // %0
-                       : "v"(x),       // %1
-                         "v"(log2e)    // %2
-      );
-  return result;
-}
-
-inline float __device__ exp_f32_scale_with_move(float x) {
-  float result;
-  __asm__ __volatile__(
-      "s_mov_b32 s45, 0x3fb8aa3b ;; Load log2(e) into scalar\n\t"
-      "v_mul_f32 %0, %1, s45     ;; x * log2(e)\n\t"
-      "v_exp_f32 %0, %0          ;; 2^(x * log2(e))\n\t"
-      : "=v"(result) // %0
-      : "v"(x)       // %1
-      : "s45");
-  return result;
-}
-
-inline float __device__ exp_f32_inplace_scale(float x) {
-  float result;
-  __asm__ __volatile__(
-      "v_mul_f32_e32 %0, 0x3fb8aa3b, %1     ;; x * log2(e)\n\t"
-      "v_exp_f32_e32 %0, %0                 ;; 2^(x * log2(e))\n\t"
-      : "=v"(result) // %0
-      : "v"(x)       // %1
-      );
-  return result;
-}
-
-inline float __device__ exp_f32_precise(float x) {
-  float result;
-  float tmp_n, tmp_r, tmp_lo, tmp_thresh;
-  __asm__ __volatile__(
-      "                                           ;; --- Load constants into vgprs ---\n\t"
-      "v_mov_b32_e32  %1, 0x3fb8aa3b              ;; tmp_n    = log2e_hi\n\t"
-      "v_mov_b32_e32  %2, 0x32a5705f              ;; tmp_r    = log2e_lo\n\t"
-      "                                           ;; --- Argument reduction ---\n\t"
-      "v_mul_f32_e32  %0, %4, %1                  ;; result   = x * log2e_hi\n\t"
-      "v_rndne_f32_e32 %3, %0                     ;; tmp_lo   = n = round(result)\n\t"
-      "v_fma_f32      %1, %4, %1, -%0             ;; tmp_n    = fma(x, log2e_hi, -result) = hi_err\n\t"
-      "v_sub_f32_e32  %0, %0, %3                  ;; result   = frac = result - n\n\t"
-      "v_fmac_f32_e32 %1, %4, %2                  ;; tmp_n   += x * log2e_lo\n\t"
-      "v_add_f32_e32  %1, %0, %1                  ;; tmp_n    = r = frac + err\n\t"
-      "                                           ;; --- Core ---\n\t"
-      "v_cvt_i32_f32_e32 %3, %3                   ;; tmp_lo   = (int)n\n\t"
-      "v_exp_f32_e32  %1, %1                      ;; tmp_n    = 2^r\n\t"
-      "                                           ;; --- Clamp setup interleaved with ldexp ---\n\t"
-      "v_mov_b32_e32  %2, 0xc2ce8ed0              ;; tmp_r    = underflow_thresh\n\t"
-      "v_cmp_nlt_f32_e32 vcc, %4, %2              ;; vcc = (x >= underflow_thresh)\n\t"
-      "v_ldexp_f32    %0, %1, %3                  ;; result   = 2^r * 2^n  (fills hazard slot)\n\t"
-      "s_nop 0\n\t"
-      "v_cndmask_b32_e32 %0, 0, %0, vcc           ;; x < thresh → 0.0\n\t"
-      "v_mov_b32_e32  %2, 0x42b17218              ;; tmp_r    = overflow_thresh\n\t"
-      "v_cmp_ngt_f32_e32 vcc, %4, %2              ;; vcc = (x <= overflow_thresh)\n\t"
-      "v_mov_b32_e32  %2, 0x7f800000              ;; tmp_r    = +inf\n\t"
-      "s_nop 1\n\t"
-      "v_cndmask_b32_e32 %0, %2, %0, vcc          ;; x > thresh → +inf\n\t"
-      : "=&v"(result),                            // %0
-        "=&v"(tmp_n),                             // %1
-        "=&v"(tmp_r),                             // %2 - reused for lo, thresholds, +inf
-        "=&v"(tmp_lo)                             // %3 - n
-      : "v"(x)                                    // %4
-      : "vcc");
-  return result;
-}
-
-inline float __device__ exp_f32_precise_stemp(float x) {
-  float result;
-  float tmp_n, tmp_r, tmp_lo, tmp_thresh;
-  uint64_t stemp;
-  __asm__ __volatile__(
-      "                                           ;; --- Load constants into vgprs ---\n\t"
-      "v_mov_b32_e32  %1, 0x3fb8aa3b              ;; tmp_n    = log2e_hi\n\t"
-      "v_mov_b32_e32  %2, 0x32a5705f              ;; tmp_r    = log2e_lo\n\t"
-      "                                           ;; --- Argument reduction ---\n\t"
-      "v_mul_f32_e32  %0, %5, %1                  ;; result   = x * log2e_hi\n\t"
-      "v_rndne_f32_e32 %3, %0                     ;; tmp_lo   = n = round(result)\n\t"
-      "v_fma_f32      %1, %5, %1, -%0             ;; tmp_n    = fma(x, log2e_hi, -result) = hi_err\n\t"
-      "v_sub_f32_e32  %0, %0, %3                  ;; result   = frac = result - n\n\t"
-      "v_fmac_f32_e32 %1, %5, %2                  ;; tmp_n   += x * log2e_lo\n\t"
-      "v_add_f32_e32  %1, %0, %1                  ;; tmp_n    = r = frac + err\n\t"
-      "                                           ;; --- Core ---\n\t"
-      "v_cvt_i32_f32_e32 %3, %3                   ;; tmp_lo   = (int)n\n\t"
-      "v_exp_f32_e32  %1, %1                      ;; tmp_n    = 2^r\n\t"
-      "                                           ;; --- Clamp setup interleaved with ldexp ---\n\t"
-      "v_mov_b32_e32  %2, 0xc2ce8ed0              ;; tmp_r    = underflow_thresh\n\t"
-      "v_cmp_nlt_f32 %4, %5, %2                   ;; stemp = (x >= underflow_thresh)\n\t"
-      "v_ldexp_f32    %0, %1, %3                  ;; result   = 2^r * 2^n  (fills hazard slot)\n\t"
-      "s_nop 0\n\t"
-      "v_cndmask_b32 %0, 0, %0, %4                ;; x < thresh → 0.0\n\t"
-      "v_mov_b32_e32  %2, 0x42b17218              ;; tmp_r    = overflow_thresh\n\t"
-      "v_cmp_ngt_f32 %4, %5, %2                   ;; stemp = (x <= overflow_thresh)\n\t"
-      "v_mov_b32_e32  %2, 0x7f800000              ;; tmp_r    = +inf\n\t"
-      "s_nop 1\n\t"
-      "v_cndmask_b32 %0, %2, %0, %4               ;; x > thresh → +inf\n\t"
-      : "=&v"(result),                            // %0
-        "=&v"(tmp_n),                             // %1
-        "=&v"(tmp_r),                             // %2 - reused for lo, thresholds, +inf
-        "=&v"(tmp_lo),                            // %3 - n
-        "=&s"(stemp)                              // %4
-      : "v"(x)                                    // %5
-      : /* no clobbers */ );
+// placeholder for PTX inline asm implementation.  Expect e2x with log_2(e) scaling, or something fancier.
+inline float __device__ exp_f32(float x) {
+  float result = expf(x);
   return result;
 }
 // clang-format on
 
-//#define CUSTOM_EXPF exp_f32_scale_as_input
-//#define CUSTOM_EXPF exp_f32_scale_with_move
-#ifdef DILUVIAN_FAST_MATH
-#define CUSTOM_EXPF exp_f32_inplace_scale
-#else
-//#define CUSTOM_EXPF exp_f32_precise
-#define CUSTOM_EXPF exp_f32_precise_stemp
-#endif
+#define CUSTOM_EXPF exp_f32
 
 // ---------------------------------------------------------------------------
 // Test-case table
@@ -280,8 +164,8 @@ public:
   float input[N];
   float output_vexp[N];      // v_exp_f32 results (2^x)
   float output_exp[N];       // CUSTOM_EXPF results (e^x via mul+exp)
-  float output_rocm_exp[N];  // expf() results (ROCm library)
-  float output_rocm_fexp[N]; // __expf() results (ROCm library)
+  float output_cuda_exp[N];  // expf() results (CUDA library)
+  float output_cuda_fexp[N]; // __expf() results (CUDA fast approx)
 
   __host__ ExpTester() {
     for (size_t i = 0; i < N; i++) {
@@ -292,48 +176,48 @@ public:
   void __host__ reset() {
     std::memset(output_vexp, 0xff, sizeof(output_vexp));
     std::memset(output_exp, 0xff, sizeof(output_exp));
-    std::memset(output_rocm_exp, 0xff, sizeof(output_rocm_exp));
-    std::memset(output_rocm_fexp, 0xff, sizeof(output_rocm_fexp));
+    std::memset(output_cuda_exp, 0xff, sizeof(output_cuda_exp));
+    std::memset(output_cuda_fexp, 0xff, sizeof(output_cuda_fexp));
   }
 
   void __host__ displayResults(const float *torchinductor,
                                const float *torcheager) const;
-
-  __global__ static void testKernelExp(ExpTester *self) {
-    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < N) {
-      self->output_exp[idx] = CUSTOM_EXPF(self->input[idx]);
-    }
-  }
-
-  __global__ static void testKernelROCmExp(ExpTester *self) {
-    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < N) {
-      self->output_rocm_exp[idx] = expf(self->input[idx]);
-    }
-  }
-
-  __global__ static void testKernelROCmFExp(ExpTester *self) {
-    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < N) {
-      self->output_rocm_fexp[idx] = __expf(self->input[idx]); // Fast approximate e^x (lower precision)
-    }
-  }
-
-  // -- kernels for just looking at asm listings ------------------------------
-
-  __global__ static void testKernelOneExp(ExpTester *self) {
-    self->output_exp[0] = CUSTOM_EXPF(self->input[0]);
-  }
-
-  __global__ static void testKernelOneROCmExp(ExpTester *self) {
-    self->output_rocm_exp[0] = expf(self->input[0]);
-  }
-
-  __global__ static void testKernelOneROCmFExp(ExpTester *self) {
-    self->output_rocm_fexp[0] = __expf(self->input[0]);
-  }
 };
+
+__global__ void testKernelExp(ExpTester *self) {
+  size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < ExpTester::N) {
+    self->output_exp[idx] = CUSTOM_EXPF(self->input[idx]);
+  }
+}
+
+__global__ void testKernelCudaExp(ExpTester *self) {
+  size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < ExpTester::N) {
+    self->output_cuda_exp[idx] = expf(self->input[idx]);
+  }
+}
+
+__global__ void testKernelCudaFExp(ExpTester *self) {
+  size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < ExpTester::N) {
+    self->output_cuda_fexp[idx] = __expf(self->input[idx]); // Fast approximate e^x (lower precision)
+  }
+}
+
+// -- kernels for just looking at asm listings ------------------------------
+
+__global__ void testKernelOneExp(ExpTester *self) {
+  self->output_exp[0] = CUSTOM_EXPF(self->input[0]);
+}
+
+__global__ void testKernelOneCudaExp(ExpTester *self) {
+  self->output_cuda_exp[0] = expf(self->input[0]);
+}
+
+__global__ void testKernelOneCudaFExp(ExpTester *self) {
+  self->output_cuda_fexp[0] = __expf(self->input[0]);
+}
 
 bool verbose{};
 bool useColor{};
@@ -375,8 +259,8 @@ void __host__ ExpTester::displayResults(const float *torchinductor,
     float x = input[i];
     float ref = std::exp(x);
 
-    OneResult32 v_expf(ref, output_rocm_exp[i], true, verbose);
-    OneResult32 v__expf(ref, output_rocm_fexp[i], true, verbose);
+    OneResult32 v_expf(ref, output_cuda_exp[i], true, verbose);
+    OneResult32 v__expf(ref, output_cuda_fexp[i], true, verbose);
     OneResult32 v_asm(ref, output_exp[i], true, verbose);
     OneResult32 v_eager(ref, torcheager ? torcheager[i] : 0.0f,
                       torcheager != nullptr, verbose);
@@ -501,7 +385,7 @@ int main(int argc, char **argv) {
                    "\n\n"
                    "Run with:\n"
                    "  pip3 install torch --index-url "
-                   "https://download.pytorch.org/whl/rocm6.3\n"
+                   "https://download.pytorch.org/whl/cu126\n"
                    "\n\n"
                    "./math/expf_test --dump-inputs ./exptest.in\n"
                    "../torchexp.py file ./exptest.in\n"
@@ -570,18 +454,15 @@ int main(int argc, char **argv) {
   tester->reset();
 
   // Test CUSTOM_EXPF (e^x via mul+exp)
-  hipLaunchKernelGGL(HIP_KERNEL_NAME(ExpTester::testKernelExp), gridSize,
-                     blockSize, 0, 0, tester);
+  testKernelExp<<<gridSize, blockSize>>>(tester);
   CUDA_CHECK(cudaDeviceSynchronize());
 
-  // Test ROCm expf()
-  hipLaunchKernelGGL(HIP_KERNEL_NAME(ExpTester::testKernelROCmExp), gridSize,
-                     blockSize, 0, 0, tester);
+  // Test CUDA expf()
+  testKernelCudaExp<<<gridSize, blockSize>>>(tester);
   CUDA_CHECK(cudaDeviceSynchronize());
 
-  // Test ROCm __expf()
-  hipLaunchKernelGGL(HIP_KERNEL_NAME(ExpTester::testKernelROCmFExp), gridSize,
-                     blockSize, 0, 0, tester);
+  // Test CUDA __expf()
+  testKernelCudaFExp<<<gridSize, blockSize>>>(tester);
   CUDA_CHECK(cudaDeviceSynchronize());
 
   // Display results (computes CPU reference inline)
