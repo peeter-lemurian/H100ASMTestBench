@@ -1,17 +1,10 @@
 //
-// cossin_test.hip
+// cossin_test.cu
 //
-// Tests the v_cos_f32 and v_sin_f32 instructions on AMD MI300 hardware,
-// comparing results against std::cosf() and std::sinf() computed on the CPU.
-//
-// The intent is to:
-//   1. Establish ground truth via ROCm's cosf() and sinf().
-//   2. Test hand-coded inline-asm cos(x) and sin(x) using v_cos_f32 and
-//   v_sin_f32.
-//
-// The AMD v_cos_f32 and v_sin_f32 instructions compute cos(x*2*pi) and
-// sin(x*2*pi) where x is the input. So to compute cos/sin(radians), we need:
-//   v_cos_f32/v_sin_f32 with input = radians / (2*pi)
+// Tests cosf/sinf on NVIDIA H100 hardware, comparing:
+//   1. CUDA cosf()/sinf() (library reference)
+//   2. CUDA __cosf()/__sinf() (fast approximate)
+//   3. Custom inline-asm wrappers (placeholder for future PTX)
 //
 #include <cmath>
 #include <cstdint>
@@ -27,7 +20,7 @@
 
 #include "OneResult32.hpp"
 #include "colors.hpp"
-#include "hipcheck.hpp"
+#include "cuda_check.hpp"
 #include "readbinary.hpp"
 
 // clang-format off
@@ -214,12 +207,9 @@ public:
   static constexpr size_t N = 85;
 
   float input[N];
-  float output_libf[N];     // ROCm cosf() or sinf()
-  float output_fast[N];     // ROCm __cosf() or __sinf() (fast approximate)
+  float output_libf[N];     // CUDA cosf() or sinf()
+  float output_fast[N];     // CUDA __cosf() or __sinf() (fast approximate)
   float output_simple[N];   // custom_cos_simple() or custom_sin_simple()
-  float output_dpscale[N];  // custom_cos_dp_scale() or custom_sin_dp_scale()
-  float output_dpreduce[N]; // custom_cos_dp_reduce_rint_asm() or
-                            // custom_sin_dp_reduce_rint_asm()
 
   __host__ TrigTester() {
     for (size_t i = 0; i < N; i++)
@@ -230,110 +220,68 @@ public:
     std::memset(output_libf, 0xff, sizeof(output_libf));
     std::memset(output_fast, 0xff, sizeof(output_fast));
     std::memset(output_simple, 0xff, sizeof(output_simple));
-    std::memset(output_dpscale, 0xff, sizeof(output_dpscale));
-    std::memset(output_dpreduce, 0xff, sizeof(output_dpreduce));
   }
-
-  // -- kernels ---------------------------------------------------------------
-
-  __global__ static void testKernelCosf(TrigTester *self) {
-    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < N)
-      self->output_libf[idx] = cosf(self->input[idx]);
-  }
-
-  __global__ static void testKernelCustomCosSimple(TrigTester *self) {
-    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < N)
-      self->output_simple[idx] = custom_cos_simple(self->input[idx]);
-  }
-
-  __global__ static void testKernelCustomCosDPScale(TrigTester *self) {
-    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < N)
-      self->output_dpscale[idx] = custom_cos_dp_scale(self->input[idx]);
-  }
-
-  __global__ static void testKernelCustomCosDPReduce(TrigTester *self) {
-    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < N)
-      self->output_dpreduce[idx] = custom_cos_dp_reduce_rint_asm(self->input[idx]);
-  }
-
-  __global__ static void testKernelFastCos(TrigTester *self) {
-    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < N)
-      self->output_fast[idx] = __cosf(self->input[idx]);
-  }
-
-  __global__ static void testKernelSinf(TrigTester *self) {
-    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < N)
-      self->output_libf[idx] = sinf(self->input[idx]);
-  }
-
-  __global__ static void testKernelFastSin(TrigTester *self) {
-    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < N)
-      self->output_fast[idx] = __sinf(self->input[idx]);
-  }
-
-  __global__ static void testKernelCustomSinSimple(TrigTester *self) {
-    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < N)
-      self->output_simple[idx] = custom_sin_simple(self->input[idx]);
-  }
-
-  __global__ static void testKernelCustomSinDPScale(TrigTester *self) {
-    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < N)
-      self->output_dpscale[idx] = custom_sin_dp_scale(self->input[idx]);
-  }
-
-  __global__ static void testKernelCustomSinDPReduce(TrigTester *self) {
-    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < N)
-      self->output_dpreduce[idx] = custom_sin_dp_reduce_rint_asm(self->input[idx]);
-  }
-
-  // -- kernels for just looking at asm listings ------------------------------
-
-  __global__ static void testKernelOneCosf(TrigTester *self) { self->output_libf[0] = cosf(self->input[0]); }
-
-  __global__ static void testKernelOneCustomCosSimple(TrigTester *self) {
-    self->output_simple[0] = custom_cos_simple(self->input[0]);
-  }
-
-  __global__ static void testKernelOneCustomCosDPScale(TrigTester *self) {
-    self->output_dpscale[0] = custom_cos_dp_scale(self->input[0]);
-  }
-
-  __global__ static void testKernelOneCustomCosDPReduce(TrigTester *self) {
-    self->output_dpreduce[0] = custom_cos_dp_reduce_rint_asm(self->input[0]);
-  }
-
-  __global__ static void testKernelOneFastCos(TrigTester *self) { self->output_fast[0] = __cosf(self->input[0]); }
-
-  __global__ static void testKernelOneSinf(TrigTester *self) { self->output_libf[0] = sinf(self->input[0]); }
-
-  __global__ static void testKernelOneCustomSinSimple(TrigTester *self) {
-    self->output_simple[0] = custom_sin_simple(self->input[0]);
-  }
-
-  __global__ static void testKernelOneCustomSinDPScale(TrigTester *self) {
-    self->output_dpscale[0] = custom_sin_dp_scale(self->input[0]);
-  }
-
-  __global__ static void testKernelOneCustomSinDPReduce(TrigTester *self) {
-    self->output_dpreduce[0] = custom_sin_dp_reduce_rint_asm(self->input[0]);
-  }
-
-  __global__ static void testKernelOneFastSin(TrigTester *self) { self->output_fast[0] = __sinf(self->input[0]); }
 
   // -- display ---------------------------------------------------------------
 
   void __host__ displayResults(TrigOp op, const float *torchinductor, const float *torcheager) const;
 };
+
+// -- kernels ---------------------------------------------------------------
+
+__global__ void testKernelCosf(TrigTester *self) {
+  size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < TrigTester::N)
+    self->output_libf[idx] = cosf(self->input[idx]);
+}
+
+__global__ void testKernelCustomCosSimple(TrigTester *self) {
+  size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < TrigTester::N)
+    self->output_simple[idx] = custom_cos_simple(self->input[idx]);
+}
+
+__global__ void testKernelFastCos(TrigTester *self) {
+  size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < TrigTester::N)
+    self->output_fast[idx] = __cosf(self->input[idx]);
+}
+
+__global__ void testKernelSinf(TrigTester *self) {
+  size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < TrigTester::N)
+    self->output_libf[idx] = sinf(self->input[idx]);
+}
+
+__global__ void testKernelFastSin(TrigTester *self) {
+  size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < TrigTester::N)
+    self->output_fast[idx] = __sinf(self->input[idx]);
+}
+
+__global__ void testKernelCustomSinSimple(TrigTester *self) {
+  size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < TrigTester::N)
+    self->output_simple[idx] = custom_sin_simple(self->input[idx]);
+}
+
+// -- kernels for just looking at asm listings ------------------------------
+
+__global__ void testKernelOneCosf(TrigTester *self) { self->output_libf[0] = cosf(self->input[0]); }
+
+__global__ void testKernelOneCustomCosSimple(TrigTester *self) {
+  self->output_simple[0] = custom_cos_simple(self->input[0]);
+}
+
+__global__ void testKernelOneFastCos(TrigTester *self) { self->output_fast[0] = __cosf(self->input[0]); }
+
+__global__ void testKernelOneSinf(TrigTester *self) { self->output_libf[0] = sinf(self->input[0]); }
+
+__global__ void testKernelOneCustomSinSimple(TrigTester *self) {
+  self->output_simple[0] = custom_sin_simple(self->input[0]);
+}
+
+__global__ void testKernelOneFastSin(TrigTester *self) { self->output_fast[0] = __sinf(self->input[0]); }
 
 bool verbose{};
 bool useColor{};
@@ -348,14 +296,14 @@ void __host__ TrigTester::displayResults(TrigOp op, const float *torchinductor, 
 
   if (csvOutput) {
     auto ref_func =
-        (op == TrigOp::Cos) ? static_cast<float (*)(float)>(std::cosf) : static_cast<float (*)(float)>(std::sinf);
+        (op == TrigOp::Cos) ? static_cast<float (*)(float)>(cosf) : static_cast<float (*)(float)>(sinf);
 
-    std::string rocmCol = (op == TrigOp::Cos) ? "ROCm cosf" : "ROCm sinf";
-    std::string fastCol = (op == TrigOp::Cos) ? "ROCm __cosf" : "ROCm __sinf";
+    std::string cudaCol = (op == TrigOp::Cos) ? "CUDA cosf" : "CUDA sinf";
+    std::string fastCol = (op == TrigOp::Cos) ? "CUDA __cosf" : "CUDA __sinf";
 
     std::cout << std::format(
-      "op,idx,x,label,row,std,\"{}\",\"{}\",asm,dp_scale,dp_reduce,torch_eager,torch_inductor\n",
-      rocmCol, fastCol);
+      "op,idx,x,label,row,std,\"{}\",\"{}\",asm,torch_eager,torch_inductor\n",
+      cudaCol, fastCol);
 
     for (size_t i = 0; i < N; i++) {
       float x = input[i];
@@ -364,8 +312,6 @@ void __host__ TrigTester::displayResults(TrigOp op, const float *torchinductor, 
       OneResult32 v_libf(ref, output_libf[i], true, verbose);
       OneResult32 v_fast(ref, output_fast[i], true, verbose);
       OneResult32 v_simple(ref, output_simple[i], true, verbose);
-      OneResult32 v_dpscale(ref, output_dpscale[i], true, verbose);
-      OneResult32 v_dpreduce(ref, output_dpreduce[i], true, verbose);
       OneResult32 v_eager(ref, torcheager ? torcheager[i] : 0.0f, torcheager != nullptr, verbose);
       OneResult32 v_inductor(ref, torchinductor ? torchinductor[i] : 0.0f, torchinductor != nullptr, verbose);
 
@@ -373,21 +319,21 @@ void __host__ TrigTester::displayResults(TrigOp op, const float *torchinductor, 
       std::memcpy(&rbits, &ref, sizeof(ref));
       std::string ref_hex = std::format("0x{:08x}", rbits);
 
-      bool allMatch = v_libf.match and v_fast.match and v_simple.match and v_dpscale.match and v_dpreduce.match and
+      bool allMatch = v_libf.match and v_fast.match and v_simple.match and
                       v_inductor.match and v_eager.match;
 
       if (!quiet or !allMatch) {
-        std::cout << std::format("{},{},{:g},\"{}\",VALUE,{:g},{:g},{:g},{:g},{:g},{:g},{},{}\n",
+        std::cout << std::format("{},{},{:g},\"{}\",VALUE,{:g},{:g},{:g},{:g},{},{}\n",
                                  opName, i, x, kCases[i].label, ref, output_libf[i], output_fast[i],
-                                 output_simple[i], output_dpscale[i], output_dpreduce[i],
+                                 output_simple[i],
                                  torcheager ? std::format("{:g}", torcheager[i]) : "",
                                  torchinductor ? std::format("{:g}", torchinductor[i]) : "");
       }
 
       if ((verbose or !allMatch) and (!quiet or !allMatch)) {
-        std::cout << std::format("{},{},,\"\",HEX,{},{},{},{},{},{},{},{}\n", opName, i, ref_hex,
+        std::cout << std::format("{},{},,\"\",HEX,{},{},{},{},{},{}\n", opName, i, ref_hex,
                                  v_libf.hexValue(), v_fast.hexValue(),
-                                 v_simple.hexValue(), v_dpscale.hexValue(), v_dpreduce.hexValue(),
+                                 v_simple.hexValue(),
                                  v_eager.hexValue(), v_inductor.hexValue());
       }
 
@@ -396,14 +342,11 @@ void __host__ TrigTester::displayResults(TrigOp op, const float *torchinductor, 
         std::string es_libf = v_libf.errorString(thresh);
         std::string es_fast = v_fast.errorString(thresh);
         std::string es_simple = v_simple.errorString(thresh);
-        std::string es_dpscale = v_dpscale.errorString(thresh);
-        std::string es_dpreduce = v_dpreduce.errorString(thresh);
         std::string es_eager = v_eager.errorString(thresh);
         std::string es_inductor = v_inductor.errorString(thresh);
 
-        std::cout << std::format("{},{},,\"\",DIFF,,{},{},{},{},{},{},{}\n", opName, i, es_libf, es_fast,
-                                 es_simple, es_dpscale,
-                                 es_dpreduce, es_eager, es_inductor);
+        std::cout << std::format("{},{},,\"\",DIFF,,{},{},{},{},{}\n", opName, i, es_libf, es_fast,
+                                 es_simple, es_eager, es_inductor);
       }
     }
     return;
@@ -418,11 +361,11 @@ void __host__ TrigTester::displayResults(TrigOp op, const float *torchinductor, 
   }
 
   auto ref_func =
-      (op == TrigOp::Cos) ? static_cast<float (*)(float)>(std::cosf) : static_cast<float (*)(float)>(std::sinf);
+      (op == TrigOp::Cos) ? static_cast<float (*)(float)>(cosf) : static_cast<float (*)(float)>(sinf);
 
   std::string refCol = std::format("std::{}f", opName);
-  std::string libCol = (op == TrigOp::Cos) ? "ROCm cosf" : "ROCm sinf";
-  std::string fastCol = (op == TrigOp::Cos) ? "ROCm __cosf" : "ROCm __sinf";
+  std::string libCol = (op == TrigOp::Cos) ? "CUDA cosf" : "CUDA sinf";
+  std::string fastCol = (op == TrigOp::Cos) ? "CUDA __cosf" : "CUDA __sinf";
 
   std::cout << std::format("{:>4}"     // Idx
                            "{:>16}"    // x
@@ -431,14 +374,12 @@ void __host__ TrigTester::displayResults(TrigOp op, const float *torchinductor, 
                            "{:>16}"    // cosf/sinf
                            "{:>16}"    // __cosf/__sinf
                            "{:>16}"    // ASM simple
-                           "{:>16}"    // ASM dp scale
-                           "{:>16}"    // ASM dp reduce
                            "{:>16}"    // torch-eager
                            "{:>16}\n", // torch-inductor
-                           "Idx", "x", "Label", refCol, libCol, fastCol, "ASM", "dp-scale", "db-reduce",
+                           "Idx", "x", "Label", refCol, libCol, fastCol, "ASM",
                            torcheager ? "torch-eager" : "", torchinductor ? "torch-inductor" : "");
 
-  std::cout << std::string(168, '-') << "\n";
+  std::cout << std::string(136, '-') << "\n";
 
   for (size_t i = 0; i < N; i++) {
     float x = input[i];
@@ -447,8 +388,6 @@ void __host__ TrigTester::displayResults(TrigOp op, const float *torchinductor, 
     OneResult32 v_libf(ref, output_libf[i], true, verbose);
     OneResult32 v_fast(ref, output_fast[i], true, verbose);
     OneResult32 v_simple(ref, output_simple[i], true, verbose);
-    OneResult32 v_dpscale(ref, output_dpscale[i], true, verbose);
-    OneResult32 v_dpreduce(ref, output_dpreduce[i], true, verbose);
     OneResult32 v_eager(ref, torcheager ? torcheager[i] : 0.0f, torcheager != nullptr, verbose);
     OneResult32 v_inductor(ref, torchinductor ? torchinductor[i] : 0.0f, torchinductor != nullptr, verbose);
 
@@ -456,7 +395,7 @@ void __host__ TrigTester::displayResults(TrigOp op, const float *torchinductor, 
     std::memcpy(&rbits, &ref, sizeof(ref));
     std::string ref_hex = std::format("0x{:08x}", rbits);
 
-    bool allMatch = v_libf.match and v_fast.match and v_simple.match and v_dpscale.match and v_dpreduce.match and
+    bool allMatch = v_libf.match and v_fast.match and v_simple.match and
                     v_inductor.match and v_eager.match;
 
     if (!quiet or !allMatch) {
@@ -468,11 +407,9 @@ void __host__ TrigTester::displayResults(TrigOp op, const float *torchinductor, 
                                "{}"
                                "{}"
                                "{}"
-                               "{}"
-                               "{}"
                                "{}\n",
                                i, x, kCases[i].label, ref, v_libf.value(), v_fast.value(), v_simple.value(),
-                               v_dpscale.value(), v_dpreduce.value(), v_eager.value(), v_inductor.value());
+                               v_eager.value(), v_inductor.value());
     }
 
     if (!allMatch) {
@@ -485,26 +422,22 @@ void __host__ TrigTester::displayResults(TrigOp op, const float *torchinductor, 
                       "{:>16}"
                       "{:>16}"
                       "{:>16}"
-                      "{:>16}"
-                      "{:>16}"
                       "{:>16}\n",
                       "", "", "", ref_hex, v_libf.hexValue(), v_fast.hexValue(), v_simple.hexValue(),
-                      v_dpscale.hexValue(), v_dpreduce.hexValue(), v_eager.hexValue(), v_inductor.hexValue());
+                      v_eager.hexValue(), v_inductor.hexValue());
       std::cout << hexline;
 
       int thresh = 4096;
       std::string es_libf = v_libf.errorString(thresh);
       std::string es_fast = v_fast.errorString(thresh);
       std::string es_simple = v_simple.errorString(thresh);
-      std::string es_dpscale = v_dpscale.errorString(thresh);
-      std::string es_dpreduce = v_dpreduce.errorString(thresh);
       std::string es_eager = v_eager.errorString(thresh);
       std::string es_inductor = v_inductor.errorString(thresh);
 
       const char *color = YELLOW;
 
-      if ((es_libf == "ERROR") or (es_fast == "ERROR") or (es_simple == "ERROR") or (es_dpscale == "ERROR") or
-          (es_dpreduce == "ERROR") or (es_eager == "ERROR") or (es_inductor == "ERROR")) {
+      if ((es_libf == "ERROR") or (es_fast == "ERROR") or (es_simple == "ERROR") or
+          (es_eager == "ERROR") or (es_inductor == "ERROR")) {
         color = RED;
       }
 
@@ -520,10 +453,8 @@ void __host__ TrigTester::displayResults(TrigOp op, const float *torchinductor, 
                       "{:>16}"
                       "{:>16}"
                       "{:>16}"
-                      "{:>16}"
-                      "{:>16}"
                       "{:>16}\n",
-                      "", "", "", "", es_libf, es_fast, es_simple, es_dpscale, es_dpreduce, es_eager, es_inductor);
+                      "", "", "", "", es_libf, es_fast, es_simple, es_eager, es_inductor);
       std::cout << matchline;
       if (useColor) {
         std::cout << RESET;
@@ -673,34 +604,22 @@ int main(int argc, char **argv) {
   dim3 gridSize(1);
 
   if (op == TrigOp::Cos) {
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(TrigTester::testKernelCosf), gridSize, blockSize, 0, 0, tester);
+    testKernelCosf<<<gridSize, blockSize>>>(tester);
     CUDA_CHECK(cudaDeviceSynchronize());
 
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(TrigTester::testKernelFastCos), gridSize, blockSize, 0, 0, tester);
+    testKernelFastCos<<<gridSize, blockSize>>>(tester);
     CUDA_CHECK(cudaDeviceSynchronize());
 
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(TrigTester::testKernelCustomCosSimple), gridSize, blockSize, 0, 0, tester);
-    CUDA_CHECK(cudaDeviceSynchronize());
-
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(TrigTester::testKernelCustomCosDPScale), gridSize, blockSize, 0, 0, tester);
-    CUDA_CHECK(cudaDeviceSynchronize());
-
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(TrigTester::testKernelCustomCosDPReduce), gridSize, blockSize, 0, 0, tester);
+    testKernelCustomCosSimple<<<gridSize, blockSize>>>(tester);
     CUDA_CHECK(cudaDeviceSynchronize());
   } else {
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(TrigTester::testKernelSinf), gridSize, blockSize, 0, 0, tester);
+    testKernelSinf<<<gridSize, blockSize>>>(tester);
     CUDA_CHECK(cudaDeviceSynchronize());
 
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(TrigTester::testKernelFastSin), gridSize, blockSize, 0, 0, tester);
+    testKernelFastSin<<<gridSize, blockSize>>>(tester);
     CUDA_CHECK(cudaDeviceSynchronize());
 
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(TrigTester::testKernelCustomSinSimple), gridSize, blockSize, 0, 0, tester);
-    CUDA_CHECK(cudaDeviceSynchronize());
-
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(TrigTester::testKernelCustomSinDPScale), gridSize, blockSize, 0, 0, tester);
-    CUDA_CHECK(cudaDeviceSynchronize());
-
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(TrigTester::testKernelCustomSinDPReduce), gridSize, blockSize, 0, 0, tester);
+    testKernelCustomSinSimple<<<gridSize, blockSize>>>(tester);
     CUDA_CHECK(cudaDeviceSynchronize());
   }
 
