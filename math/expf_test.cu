@@ -23,14 +23,64 @@
 #include "cuda_check.hpp"
 
 // clang-format off
-// placeholder for PTX inline asm implementation.  Expect e2x with log_2(e) scaling, or something fancier.
-inline float __device__ exp_f32(float x) {
-  float result = expf(x);
+// PTX inline asm implementation.
+inline float __device__ expf_custom(float x) {
+  float result, tmp_f;
+  int tmp_i;
+
+  // The number 252 is 2 × 126, where 126 is the magnitude of the minimum normal
+  // exponent in IEEE 754 single precision (exponent bias 127, minimum normal
+  // exponent = −126).
+  //
+  // The useful range of (x ⋅ log_2 e) for single-precision
+  // exp(x) is approximately [−126,+126], (beyond that, the result is 0 or ∞). The
+  // goal is to map this range into [0,1] so the hardware saturation clamp
+  // (cvt.sat) can handle overflow and underflow in a single branchless
+  // instruction.
+  __asm__ __volatile__(
+      // exp(x) = 2^(x * log2(e)), decomposed as 2^n * 2^frac
+      // Step 1: map x into [0,1] range with overflow/underflow clamp
+      "fma.rn.f32 %0, %3, 0f3BBB989D, 0f3F000000;\n\t"
+      // %0 = x * (log2(e)/252) + 0.5
+      "cvt.sat.f32.f32 %0, %0;\n\t"
+      // %0 = clamp(%0, 0.0, 1.0)
+      // Step 2: magic-number rounding — extract integer exponent n
+      "fma.rm.f32 %0, %0, 0f437C0000, 0f4B400001;\n\t"
+      // %0 = floor(%0 * 252.0 + 12582913.0)
+      // low bits of mantissa now encode n+1
+      // Step 3: Cody-Waite range reduction for fractional part
+      "add.f32 %1, %0, 0fCB40007F;\n\t"
+      // %1 = %0 - 12583039.0 = (n - 126)
+      "neg.f32 %1, %1;\n\t"
+      // %1 = -(n - 126) = (126 - n)
+      "fma.rn.f32 %1, %3, 0f3FB8AA3B, %1;\n\t"
+      // %1 = x * log2(e)_hi + (126 - n)
+      "fma.rn.f32 %1, %3, 0f32A57060, %1;\n\t"
+      // %1 += x * log2(e)_lo — low-order Cody-Waite correction
+      // %1 now holds the fractional part f of x*log2(e)
+      // Step 4: construct 2^(n-126) via IEEE bit manipulation
+      "mov.b32 %2, %0;\n\t"
+      // %2 = reinterpret magic-rounded float as int32
+      "shl.b32 %2, %2, 23;\n\t"
+      // %2 <<= 23 — shift n into IEEE 754 exponent field
+      "mov.b32 %0, %2;\n\t"
+      // %0 = reinterpret as float = 2^(n-126)
+      // Step 5: hardware exp2 of fractional part, then combine
+      "ex2.approx.ftz.f32 %1, %1;\n\t"
+      // %1 = 2^f — hardware fast approximation, denorms flushed to zero
+      "mul.f32 %0, %1, %0;\n\t"
+      // %0 = 2^f * 2^(n-126) = 2^(x*log2(e)) = exp(x)
+      : "=&f"(result),  // %0 — early clobber: written before %3 is fully consumed
+        "=&f"(tmp_f),   // %1 — early clobber: written before %3 is fully consumed
+        "=r"(tmp_i)     // %2 — no early clobber needed (different class, and written after last %3 read)
+      : "f"(x)          // %3 — input: x, read in multiple instructions throughout
+      );
+
   return result;
 }
 // clang-format on
 
-#define CUSTOM_EXPF exp_f32
+#define CUSTOM_EXPF expf_custom
 
 // ---------------------------------------------------------------------------
 // Test-case table

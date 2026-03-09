@@ -28,16 +28,32 @@
 #include "cuda_check.hpp"
 
 // ---------------------------------------------------------------------------
-// Custom sqrt and rsqrt -- placeholders for future inline ASM versions.
+// Custom sqrt and rsqrt -- inline ASM versions of the CUDA operations.
 // ---------------------------------------------------------------------------
 // clang-format off
 inline float __device__ custom_sqrt(float x) {
-  float result = sqrtf(x);
+  float result;
+
+  __asm__ __volatile__(
+      "// %0 = sqrt(%1)\n\t"
+      "sqrt.rn.f32 %0, %1;"
+      : "=f"(result) // %0
+      : "f"(x)       // %1
+      );
+
   return result;
 }
 
 inline float __device__ custom_rsqrt(float x) {
-  float result = rsqrtf(x);
+  float result;
+
+  __asm__ __volatile__(
+      "// %0 = rsqrt(%1)\n\t"
+      "rsqrt.approx.f32 %0, %1;"
+      : "=f"(result) // %0
+      : "f"(x)       // %1
+      );
+
   return result;
 }
 // clang-format on

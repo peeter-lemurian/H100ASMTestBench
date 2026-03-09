@@ -2,7 +2,7 @@
 // exp2f_test.cu
 //
 // Test harness for 2^x on GPU:
-//   - Expect use of PTX ex2 (CUSTOM_EXP2F -- placeholder for ASM)
+//   - Expect use of PTX ex2 (CUSTOM_EXP2F -- ASM version)
 //   - CUDA exp2f
 //
 #include <cmath>
@@ -23,7 +23,13 @@
 
 // clang-format off
 inline float __device__ exp2_f32(float x) {
-  float result = exp2f(x); // placeholder for ASM version.
+  __asm__ __volatile__(
+      "// %0 = 2^x\n\t"
+      "ex2.approx.f32 %0, %1;" // %0 = 2^x
+      : "=f"(result) // %0
+      : "f"(x)       // %1
+      );
+
   return result;
 }
 // clang-format on

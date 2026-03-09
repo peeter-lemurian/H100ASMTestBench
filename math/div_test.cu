@@ -6,7 +6,7 @@
 //
 // The intent is to:
 //   1. Establish ground truth via CUDA's operator/ and fdividef().
-//   2. Test hand-coded inline-asm division (placeholder for PTX).
+//   2. Test hand-coded PTX inline-asm division
 //
 #include <cmath>
 #include <cstdint>
@@ -25,16 +25,25 @@
 #include "readbinary.hpp"
 
 // ---------------------------------------------------------------------------
-// Custom division: placeholder for ASM version
+// Custom division: ASM version
 // ---------------------------------------------------------------------------
 // clang-format off
-inline float __device__ custom_div_naive(float a, float b) {
-  float result = (a/b);
+inline float __device__ custom_div(float a, float b) {
+  float result;
+
+  __asm__ __volatile__(
+      "// %0 = a/b\n\t"
+      "div.rn.f32 %0, %1, %2;"
+      : "=f"(result) // %0
+      : "f"(a),      // %1
+        "f"(b)       // %2
+      );
+
   return result;
 }
 // clang-format on
 
-#define CUSTOM_DIV custom_div_naive
+#define CUSTOM_DIV custom_div
 
 // ---------------------------------------------------------------------------
 // Test-case table
@@ -551,7 +560,7 @@ public:
   float input_b[N];
   float output_div[N];        // CUDA operator/
   float output_fdividef[N];   // CUDA fdividef() (fast approx)
-  float output_custom_div[N]; // CUSTOM_DIV() -- placeholder for later ASM version.
+  float output_custom_div[N]; // CUSTOM_DIV() -- ASM version.
 
   __host__ DivTester() {
     for (size_t i = 0; i < N; i++) {

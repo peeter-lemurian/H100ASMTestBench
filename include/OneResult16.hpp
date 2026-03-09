@@ -82,3 +82,5 @@ struct OneResult16 {
     }
   }
 };
+
+// vim: et ts=2 sw=2

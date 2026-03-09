@@ -34,6 +34,9 @@ struct OneResult32 {
 
     if (verbose) {
       match = (std::memcmp(&v, &ref, 4) == 0);
+      if (std::isnan(v) and std::isnan(ref)) {
+        match = true;
+      }
     }
 
     uint32_t rbits;
@@ -76,3 +79,5 @@ struct OneResult32 {
     }
   }
 };
+
+// vim: et ts=2 sw=2

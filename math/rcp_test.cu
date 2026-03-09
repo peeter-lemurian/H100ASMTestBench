@@ -22,7 +22,15 @@
 
 // clang-format off
 inline float __device__ rcp_f32(float x) {
-  float result = (1.0f / x); // placeholder for later inline ASM version.
+  float result;
+
+  __asm__ __volatile__(
+      "// %0 = 1.0f / %1 (round-to-nearest)\n\t"
+      "rcp.rn.f32 %0, %1;"
+      : "=f"(result) // %0
+      : "f"(x)       // %1
+      );
+
   return result;
 }
 // clang-format on

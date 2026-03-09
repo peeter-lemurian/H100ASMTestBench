@@ -31,3 +31,5 @@ std::vector<float> readBinaryFloatFile(const char *filename, size_t expected) {
   ifs.read(reinterpret_cast<char *>(data.data()), sz);
   return data;
 }
+
+// vim: et ts=2 sw=2

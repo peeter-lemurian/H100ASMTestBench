@@ -15,3 +15,5 @@
       std::exit(EXIT_FAILURE);                                                 \
     }                                                                          \
   } while (0)
+
+// vim: et ts=2 sw=2
