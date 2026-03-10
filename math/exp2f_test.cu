@@ -23,6 +23,7 @@
 
 // clang-format off
 inline float __device__ exp2_f32(float x) {
+  float result;
   __asm__ __volatile__(
       "// %0 = 2^x\n\t"
       "ex2.approx.f32 %0, %1;" // %0 = 2^x

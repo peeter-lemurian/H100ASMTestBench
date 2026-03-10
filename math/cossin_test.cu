@@ -194,8 +194,42 @@ static constexpr TrigCase kCases[] = {
     {-1e6f, "-1e6"},   // 82
     {-1e10f, "-1e10"}, // 83
     {-1e20f, "-1e20"}, // 84
+
+    // -----------------------------------------------------------------------
+    // Progressive large-angle stress: filling 2^33 → 2^127
+    // f64 rint valid to |x/π| < 2^52  (≈ 1.42e16)
+    // Payne-Hanek needed beyond that
+    // -----------------------------------------------------------------------
+    // 1e10→1e20 gap (f64 reduction should still work up to ~1e16)
+    {1e11f, "1e11"},   // 85  ≈ 2^36.5
+    {1e12f, "1e12"},   // 86  ≈ 2^39.9
+    {1e13f, "1e13"},   // 87  ≈ 2^43.3
+    {1e14f, "1e14"},   // 88  ≈ 2^46.5
+    {1e15f, "1e15"},   // 89  ≈ 2^49.8
+    {1e16f, "1e16"},   // 90  ≈ 2^53.2  <-- f64 rint boundary
+    {1e17f, "1e17"},   // 91  ≈ 2^56.5
+    {1e18f, "1e18"},   // 92  ≈ 2^59.8
+    {1e19f, "1e19"},   // 93  ≈ 2^63.1
+    // Beyond 1e20 up to FLT_MAX
+    {1e22f, "1e22"},   // 94  ≈ 2^73.1
+    {1e25f, "1e25"},   // 95  ≈ 2^83.0
+    {1e28f, "1e28"},   // 96  ≈ 2^93.0
+    {1e30f, "1e30"},   // 97  ≈ 2^99.7
+    {1e33f, "1e33"},   // 98  ≈ 2^109.6
+    {1e35f, "1e35"},   // 99  ≈ 2^116.3
+    {1e37f, "1e37"},   // 100 ≈ 2^122.9
+    // Negative counterparts (representative subset)
+    {-1e12f, "-1e12"}, // 101
+    {-1e14f, "-1e14"}, // 102
+    {-1e16f, "-1e16"}, // 103
+    {-1e18f, "-1e18"}, // 104
+    {-1e22f, "-1e22"}, // 105
+    {-1e25f, "-1e25"}, // 106
+    {-1e30f, "-1e30"}, // 107
+    {-1e35f, "-1e35"}, // 108
+    {-1e37f, "-1e37"}, // 109
 };
-static_assert(sizeof(kCases) / sizeof(kCases[0]) == 85, "Update TrigTester::N to match kCases length");
+static_assert(sizeof(kCases) / sizeof(kCases[0]) == 110, "Update TrigTester::N to match kCases length");
 
 // ---------------------------------------------------------------------------
 // Tester class
@@ -204,7 +238,7 @@ enum class TrigOp { Cos, Sin };
 
 class TrigTester {
 public:
-  static constexpr size_t N = 85;
+  static constexpr size_t N = 110;
 
   float input[N];
   float output_libf[N];     // CUDA cosf() or sinf()
