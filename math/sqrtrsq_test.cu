@@ -69,7 +69,6 @@ struct SqrtCase {
   const char *label;
 };
 
-// Keep in sync with SqrtRsqTester::N below.
 static constexpr SqrtCase kCases[] = {
     // Powers of 2 (exact results expected)
     {1.0f, "1.0"},                    //  0: sqrt(1) = 1, rsqrt(1) = 1

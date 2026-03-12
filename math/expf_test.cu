@@ -90,7 +90,6 @@ struct ExpCase {
   const char *label;
 };
 
-// Keep in sync with ExpTester::N below.
 static constexpr ExpCase kCases[] = {
     // Simple integer values
     {0.0f, "0"},             //  0

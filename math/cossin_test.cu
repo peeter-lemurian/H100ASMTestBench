@@ -46,7 +46,6 @@ struct TrigCase {
   const char *label;
 };
 
-// Keep in sync with CosSinTester::N below.
 static constexpr float pi = std::numbers::pi_v<float>;
 static constexpr float pi_4 = pi / 4.0f;
 

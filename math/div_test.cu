@@ -54,7 +54,6 @@ struct DivCase {
   const char *label;
 };
 
-// Keep in sync with DivTester::N below.
 static const DivCase kCases[] = {
 
     // -----------------------------------------------------------------------
