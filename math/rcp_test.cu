@@ -79,10 +79,11 @@ static constexpr RcpCase kCases[] = {
     {1e-38f, "1e-38"},
     {-1e-38f, "-1e-38"},
 };
+static constexpr size_t kNumRcpCases = sizeof(kCases) / sizeof(kCases[0]);
 
 class RcpTester {
 public:
-  static constexpr size_t N = sizeof(kCases) / sizeof(kCases[0]);
+  static constexpr size_t N = kNumRcpCases;
   float input[N];
   float output_asm[N];
   float output_cuda_div[N];

@@ -392,7 +392,7 @@ bool useColor{};
 // ---------------------------------------------------------------------------
 class PowTester {
 public:
-  static constexpr size_t N = 201;
+  static constexpr size_t N = kNumPowCases;
 
   float input_a[N];
   float input_b[N];

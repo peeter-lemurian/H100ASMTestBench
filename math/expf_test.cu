@@ -205,12 +205,11 @@ static constexpr ExpCase kCases[] = {
     {1e-3f, "1e-3"},          // 63
     {-1e-3f, "-1e-3"},        // 64
 };
-static_assert(sizeof(kCases) / sizeof(kCases[0]) == 65,
-              "Update ExpTester::N to match kCases length");
+static constexpr size_t kNumExpCases = sizeof(kCases) / sizeof(kCases[0]);
 
 class ExpTester {
 public:
-  static constexpr size_t N = 65;
+  static constexpr size_t N = kNumExpCases;
   float input[N];
   float output_vexp[N];      // v_exp_f32 results (2^x)
   float output_exp[N];       // CUSTOM_EXPF results (e^x via mul+exp)

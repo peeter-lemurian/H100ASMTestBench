@@ -546,15 +546,14 @@ static const DivCase kCases[] = {
     {3e38f, 1e38f, "3e38/1e38"},     // 234: = 3
     {2e38f, 2e38f, "2e38/2e38"},     // 235: = 1
 };
-static_assert(sizeof(kCases) / sizeof(kCases[0]) == 236,
-              "Update DivTester::N to match kCases length");
+static constexpr size_t kNumDivCases = sizeof(kCases) / sizeof(kCases[0]);
 
 // ---------------------------------------------------------------------------
 // Tester class
 // ---------------------------------------------------------------------------
 class DivTester {
 public:
-  static constexpr size_t N = 236;
+  static constexpr size_t N = kNumDivCases;
 
   float input_a[N];
   float input_b[N];

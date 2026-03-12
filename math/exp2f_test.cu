@@ -76,10 +76,11 @@ static constexpr Exp2Case kCases[] = {
     {1e-38f, "1e-38"},
     {-1e-38f, "-1e-38"},
 };
+static constexpr size_t kNumExp2Cases = sizeof(kCases) / sizeof(kCases[0]);
 
 class Exp2Tester {
 public:
-  static constexpr size_t N = sizeof(kCases) / sizeof(kCases[0]);
+  static constexpr size_t N = kNumExp2Cases;
   float input[N];
   float output_asm[N];
   float output_cuda_exp2[N];

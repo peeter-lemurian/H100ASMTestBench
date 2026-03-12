@@ -83,12 +83,11 @@ static constexpr ConvertCase kCases[] = {
     {0.0f, "+0"},
     {-0.0f, "-0"},
 };
-static_assert(sizeof(kCases) / sizeof(kCases[0]) == 24,
-              "Update Fp32ToBf16Tester::N to match kCases length");
+static constexpr size_t kNumConvertCases = sizeof(kCases) / sizeof(kCases[0]);
 
 class Fp32ToBf16Tester {
 public:
-  static constexpr size_t N = 24;
+  static constexpr size_t N = kNumConvertCases;
 
   float input[N];
   __nv_bfloat16 output_ref[N];

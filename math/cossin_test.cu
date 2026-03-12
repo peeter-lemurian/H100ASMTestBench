@@ -229,7 +229,7 @@ static constexpr TrigCase kCases[] = {
     {-1e35f, "-1e35"}, // 108
     {-1e37f, "-1e37"}, // 109
 };
-static_assert(sizeof(kCases) / sizeof(kCases[0]) == 110, "Update TrigTester::N to match kCases length");
+static constexpr size_t kNumTrigCases = sizeof(kCases) / sizeof(kCases[0]);
 
 // ---------------------------------------------------------------------------
 // Tester class
@@ -238,7 +238,7 @@ enum class TrigOp { Cos, Sin };
 
 class TrigTester {
 public:
-  static constexpr size_t N = 110;
+  static constexpr size_t N = kNumTrigCases;
 
   float input[N];
   float output_libf[N];     // CUDA cosf() or sinf()

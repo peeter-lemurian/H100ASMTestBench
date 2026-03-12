@@ -197,8 +197,7 @@ static constexpr SqrtCase kCases[] = {
     {-1e38f, "-1e38"},                  // 66
 
 };
-static_assert(sizeof(kCases) / sizeof(kCases[0]) == 67,
-              "Update SqrtRsqTester::N to match kCases length");
+static constexpr size_t kNumSqrtCases = sizeof(kCases) / sizeof(kCases[0]);
 
 // ---------------------------------------------------------------------------
 // Tester class
@@ -207,7 +206,7 @@ enum class SqrtOp { Sqrt, Rsqrt };
 
 class SqrtRsqTester {
 public:
-  static constexpr size_t N = 67;
+  static constexpr size_t N = kNumSqrtCases;
 
   float input[N];
   float output_libf[N];    // CUDA sqrtf() or rsqrtf()
