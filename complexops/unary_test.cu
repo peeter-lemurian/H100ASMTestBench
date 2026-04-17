@@ -30,25 +30,6 @@
 // Helper functions for reference
 //
 
-// Naive implementation: ~1 ULP Errors:
-//
-// See: custom_logf for a Cody-Waite hi+lo implementation matching CUDA precision.
-inline float __device__ custom_logf_naive(float x) {
-  // 1/log2(e) = 0.69314718055994530941
-  float result = custom_log2f(x) * 0.69314718055994530941f;
-  return result;
-}
-
-// Naive implementation: ~1 ULP Errors:
-//
-// See: custom_log10f for a Cody-Waite hi+lo implementation matching CUDA precision.
-//
-inline float __device__ custom_log10f_naive(float x) {
-  // 1/log2(10) = 0.30102999566398119521
-  float result = custom_log2f(x) * 0.30102999566398119521f;
-  return result;
-}
-
 // Compile-time bit-cast for test case constants (C++20)
 constexpr float uint_as_float_constexpr(uint32_t u) {
   return std::bit_cast<float>(u);
