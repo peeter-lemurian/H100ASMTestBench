@@ -274,7 +274,7 @@ int main(int argc, char **argv) {
                    "\n\n"
                    "Run with:\n"
                    "  ./math/rcp_test --dump-inputs ./rcptest.in\n"
-                   "  ../torch/torchunary.py --op reciprocal --file ./rcptest.in\n"
+                   "  ../bin/torchunary.py --op reciprocal --file ./rcptest.in\n"
                    "  ./math/rcp_test --torchinductor torchinductorreciprocal.bin --torcheager torcheagerreciprocal.bin --verbose --quiet --color | less -R\n\n"
                    "\t--dump-inputs filename.  Write input values as binary "
                    "floats to file (x0,x1,x2,...)\n"

@@ -861,7 +861,7 @@ int main(int argc, char **argv) {
                    "\n\n"
                    "Run with:\n"
                    "  ./math/div_test --dump-inputs ./divtest.in\n"
-                   "  ../torch/torchbinary.py --op div --file ./divtest.in\n"
+                   "  ../bin/torchbinary.py --op div --file ./divtest.in\n"
                    "  ./math/div_test --torchinductor torchinductordiv.bin"
                    " --torcheager torcheagerdiv.bin --verbose --quiet --color"
                    " | less -R\n"

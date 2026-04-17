@@ -271,7 +271,7 @@ int main(int argc, char **argv) {
                    " [--torchinductor torchinductorexp2.bin]"
                    "\n\n"
                    "./math/exp2f_test --dump-inputs ./exp2test.in\n"
-                   "../torch/torchunary.py --op exp2 --file ./exp2test.in\n"
+                   "../bin/torchunary.py --op exp2 --file ./exp2test.in\n"
                    "./math/exp2f_test --torchinductor torchinductorexp2.bin --torcheager torcheagerexp2.bin --verbose --quiet --color | less -R\n\n"
                    "\t--dump-inputs filename.  Write input values as binary "
                    "floats to file (x0,x1,x2,...)\n"
