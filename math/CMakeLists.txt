@@ -1,3 +1,6 @@
+# Set CUDA compilation flags for all targets
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -diag-suppress=550")
+
 add_cuda_executable(cossin_test)
 add_cuda_executable(div_test)
 add_cuda_executable(exp2f_test)
@@ -5,3 +8,4 @@ add_cuda_executable(expf_test)
 add_cuda_executable(pow_test)
 add_cuda_executable(rcp_test)
 add_cuda_executable(sqrtrsq_test)
+add_cuda_executable(unary_test)
